@@ -9,43 +9,36 @@ from telegram.ext import (
 )
 
 TOKEN = os.environ["BOT_TOKEN"]
-
 PORT = int(os.environ.get("PORT", "10000"))
 RENDER_EXTERNAL_URL = os.environ["RENDER_EXTERNAL_URL"]
 
 
-# ---------------------------------------
-# НАСТРОЙКИ ЗАЩИЩЁННЫХ ЧАТОВ / ТЕМ
-# ---------------------------------------
+# =========================================
+# НАСТРОЙКИ ЗАЩИЩЁННЫХ ГРУПП / ТЕМ
+# =========================================
 
-TEST_GROUP_ID = -1002910465621
-TEST_TOPIC_ID = 1722
+# Формат:
+# chat_id: set(thread_id)
+# None = главный чат / General
 
-STUDENT_GROUP_ID = -1004328947804
+PROTECTED_TOPICS = {
+    -1002910465621: {1722},        # тестовая группа
+    -1004328947804: {61, None},    # группа 17-116: два подчата
+}
 
 
 def is_protected(chat_id: int, thread_id):
     """
-    Возвращает True только для тех мест,
-    где студентам запрещено писать.
+    Проверяем, является ли текущее сообщение сообщением
+    из защищённой темы / подчата.
     """
+    if chat_id not in PROTECTED_TOPICS:
+        return False
 
-    # Тестовая группа — только тема 1722
-    if chat_id == TEST_GROUP_ID and thread_id == TEST_TOPIC_ID:
-        return True
-
-    # Группа 17-116 — только главный чат / General
-    # Там Telegram передаёт thread_id = None
-    if chat_id == STUDENT_GROUP_ID and thread_id is None:
-        return True
-
-    return False
+    return thread_id in PROTECTED_TOPICS[chat_id]
 
 
-async def moderate(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def moderate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.effective_message
     chat = update.effective_chat
     user = update.effective_user
@@ -56,11 +49,11 @@ async def moderate(
     chat_id = chat.id
     thread_id = message.message_thread_id
 
-    # Если это не защищённая тема — вообще ничего не делаем
+    # Если это не защищённый подчат — ничего не делаем
     if not is_protected(chat_id, thread_id):
         return
 
-    # Служебные сообщения без пользователя не трогаем
+    # Если это служебное сообщение без пользователя — пропускаем
     if not user:
         return
 
@@ -70,7 +63,7 @@ async def moderate(
             user_id=user.id
         )
 
-        # Администраторам и владельцу разрешаем писать
+        # Админов и владельца группы не трогаем
         if member.status in ("administrator", "creator"):
             print(
                 f"РАЗРЕШЕНО | "
@@ -94,7 +87,8 @@ async def moderate(
         print(
             f"ОШИБКА | "
             f"Группа: {chat.title} | "
-            f"Пользователь: {user.full_name} | "
+            f"Пользователь: {user.full_name if user else 'Unknown'} | "
+            f"thread_id: {thread_id} | "
             f"{error}"
         )
 
@@ -102,12 +96,8 @@ async def moderate(
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(
-    MessageHandler(
-        filters.ALL,
-        moderate
-    )
+    MessageHandler(filters.ALL, moderate)
 )
-
 
 if __name__ == "__main__":
     print("Topic Guard запускается...")
